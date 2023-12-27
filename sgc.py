@@ -49,7 +49,7 @@ def get_transcription(youtube_url, output_filename, get_best_model, get_latest, 
     else:
         transcription = transcriptions[0]  # Default to the first transcription if no option is specified
 
-    decoded_transcription = base64.b64decode(transcription['transcript']).decode('utf-8')
+    decoded_transcription = base64.b64decode(transcription['transcript'], validate=False).decode('utf-8')
 
     if output_filename == '-':
         print(decoded_transcription)
@@ -134,10 +134,7 @@ def request_transcription(video_url, model, save_filename=None):
     # Retrieve the completed transcription
     response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id})
     transcript_data = response.json()
-    transcript = base64.b64decode(transcript_data['transcript']).decode('utf-8')
-
-    # Decode the base64-encoded transcript
-    transcript = base64.b64decode(transcript).decode('utf-8')
+    transcript = base64.b64decode(transcript_data['transcript'], validate=False).decode('utf-8')
 
     # Save the transcript to a file if the --save option was used
     if save_filename and transcript:
@@ -181,7 +178,7 @@ def process_file(file_path, skip_prompt, model): # TODO: clean up this function
 
 def convert_and_request_transcription(file_path, model, save_filename=None):
     output_file = file_path.rsplit('.', 1)[0] + '.wav'
-    subprocess.run(['ffmpeg', '-i', file_path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', output_file]) #  TODO: use pyav rather than shelling out to ffmpeg; this is sketchy cross-platform
+    subprocess.run(['ffmpeg', '-i', file_path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-loglevel', 'quiet', output_file]) #  TODO: use pyav rather than shelling out to ffmpeg; this is sketchy cross-platform
     url = "http://localhost:8080/requestFileTranscription"
     with open(output_file, 'rb') as f:
         files = {'file': f}
@@ -219,7 +216,7 @@ def convert_and_request_transcription(file_path, model, save_filename=None):
     # Retrieve the completed transcription
     response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id})
     transcript_data = response.json()
-    transcript = base64.b64decode(transcript_data['transcript']).decode('utf-8')
+    transcript = base64.b64decode(transcript_data['transcript'], validate=False).decode('utf-8')
 
     # Save the transcript to a file if the --save option was used
     if save_filename and transcript:
@@ -327,4 +324,7 @@ def main():
     args.func(args)
 
 if __name__ == "__main__":
- main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Sending job cancellation request") # TODO, big TODO

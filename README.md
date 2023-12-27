@@ -1,2 +1,2 @@
-# python-sgc
-Python library for the Sub Gen Cluster
+# SGC CLI
+This is a command-line client for the Sub Gen Cluster. (todo: more elaboration)
