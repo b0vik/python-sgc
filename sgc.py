@@ -16,7 +16,8 @@ import time
 pbar = None
 
 def get_job_status(job_id):
-    response = requests.post('http://localhost:8080/getJobStatus', json={'jobIdentifier': job_id})
+    headers = {'Authorization': f'Bearer {get_api_key()}'}
+    response = requests.post('http://localhost:8080/getJobStatus', json={'jobIdentifier': job_id}, headers=headers)
     return response.json()
 
 def display_progress_bar(job_id):
@@ -39,8 +40,8 @@ def display_progress_bar(job_id):
         time.sleep(1)
 
 
-def get_transcription(youtube_url, output_filename, get_best_model, get_latest, output_format):
-    transcriptions = list_transcriptions(youtube_url)
+def get_transcription(media_url, output_filename, get_best_model, get_latest, output_format):
+    transcriptions = list_transcriptions(media_url)
 
     if get_best_model:
         transcription = transcriptions[0]
@@ -71,21 +72,35 @@ def get_config_path():
     # Return the path to config.yml
     return os.path.join(config_dir, 'config.yml')
 
-def create_account(username):
-    url = "http://localhost:8080/createAccount"
-    data = {
-        'username': username
-    }
-    response = requests.post(url, json=data)
-    response_data = response.json()
-
-    # Save the username and api key to config.yml
+def get_api_key():
     config = configparser.ConfigParser()
-    config['DEFAULT'] = {'username': username, 'api_key': response_data['api_key']}
-    with open(get_config_path(), 'w') as configfile:
-        config.write(configfile)
+    try:
+        config.read(get_config_path()) # TODO: error handling
+        return config['DEFAULT']['api_key']
+    except KeyError:
+        print("Error: API key not found in config.yml\nhave you created an account with 'sgc account create'?")
+        exit(1)
+    
 
-    print(response_data)
+def create_account(username):
+   url = "http://localhost:8080/createAccount"
+   data = {
+       'username': username
+   }
+   response = requests.post(url, json=data)
+   response_data = response.json()
+
+   if response.status_code != 200:
+       print(f"Error: {response_data['message']}")
+       return
+
+   # Save the username and api key to config.yml
+   config = configparser.ConfigParser()
+   config['DEFAULT'] = {'username': username, 'api_key': response_data['api_key']}
+   with open(get_config_path(), 'w') as configfile:
+       config.write(configfile)
+
+   print(response_data)
 
 def resolve_url(url):
     print(f"Resolving non-canonical url {url}:")
@@ -102,15 +117,15 @@ def resolve_url(url):
         return info_dict['channel_url']
 
 def request_transcription(video_url, model, save_filename=None):
-    url = "http://localhost:8080/requestYoutubeTranscription"
+    url = "http://localhost:8080/requestUrlTranscription"
     data = {
-        'username': 'your_username',  # replace with your username
-        'apiKey': 'your_api_key',  # replace with your api key
         'requestedModel': model,
-        'jobType': 'public-youtube-video',
+        'jobType': 'public-url',
         'audioUrl': video_url
     }
-    response = requests.post(url, json=data)
+    headers = {'Authorization': f'Bearer {get_api_key()}'}
+
+    response = requests.post(url, json=data, headers=headers)
     response_data = response.json()
 
     job_id = response_data.get('job_id')
@@ -132,7 +147,7 @@ def request_transcription(video_url, model, save_filename=None):
             time.sleep(1)
             
     # Retrieve the completed transcription
-    response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id})
+    response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id}, headers=headers)
     transcript_data = response.json()
     transcript = base64.b64decode(transcript_data['transcript'], validate=False).decode('utf-8')
 
@@ -183,12 +198,11 @@ def convert_and_request_transcription(file_path, model, save_filename=None):
     with open(output_file, 'rb') as f:
         files = {'file': f}
         data = {
-            'username': 'your_username',  # replace with your username
-            'apiKey': 'your_api_key',  # replace with your api key
             'requestedModel': model,
             'jobType': 'file'
         }
-        response = requests.post(url, files=files, data=data)
+        headers = {'Authorization': f'Bearer {get_api_key()}'}
+        response = requests.post(url, files=files, data=data, headers=headers)
 
     # Extract the job_id from the response
     response_data = response.json()
@@ -214,7 +228,7 @@ def convert_and_request_transcription(file_path, model, save_filename=None):
             time.sleep(1)
 
     # Retrieve the completed transcription
-    response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id})
+    response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id}, headers=headers)
     transcript_data = response.json()
     transcript = base64.b64decode(transcript_data['transcript'], validate=False).decode('utf-8')
 
@@ -229,10 +243,11 @@ def convert_and_request_transcription(file_path, model, save_filename=None):
 def list_transcriptions(url): #TODO: separate this
     api_url = "http://localhost:8080/retrieveCompletedTranscripts"
     data = {
-        'transcriptType': 'public-youtube-video',
-        'youtubeUrl': url
+        'transcriptType': 'public-url',
+        'audioUrl': url
     }
-    response = requests.post(api_url, json=data)
+    headers = {'Authorization': f'Bearer {get_api_key()}'}
+    response = requests.post(api_url, json=data, headers=headers)
     transcriptions = response.json()
 
     # Sort the transcriptions by model quality
@@ -256,7 +271,7 @@ def main():
     transcribe_parser = subparsers.add_parser('transcribe', description='Requests transcriptions from the SGC cluster.')
     transcribe_subparsers = transcribe_parser.add_subparsers()
 
-    channel_list_parser = transcribe_subparsers.add_parser('list', description='Transcribe a list of URLs supported by yt-dlp.\nchannel_list should be text file containing the list of URLs you want to transcribe, separated by newlines.')
+    channel_list_parser = transcribe_subparsers.add_parser('list', description='Transcribe a list of YouTube URLs.\nchannel_list should be text file containing the list of URLs you want to transcribe, separated by newlines.')
     channel_list_parser.add_argument('channel_list', type=str)
     channel_list_parser.add_argument('--skip-prompt', action='store_true')
     channel_list_parser.set_defaults(func=lambda args: process_file(args.channel_list, args.skip_prompt))
@@ -305,13 +320,13 @@ def main():
     channel_list_parser.set_defaults(func=lambda args: process_file(args.channel_list, args.skip_prompt, args.model, args.save))
 
     # Add 'url' subcommand under 'get'
-    url_get_parser = get_subparsers.add_parser('url', description='Gets subtitles for a YouTube URL.')
+    url_get_parser = get_subparsers.add_parser('url', description='Gets subtitles for a public video or audio URL.')
     url_get_parser.add_argument('output_filename', type=str)
-    url_get_parser.add_argument('youtube_url', type=str)
+    url_get_parser.add_argument('media_url', type=str)
     url_get_parser.add_argument('--get-best-model', action='store_true')
     url_get_parser.add_argument('--get-latest', action='store_true')
     url_get_parser.add_argument('--output-format', type=str, choices=['vtt'], default='vtt')
-    url_get_parser.set_defaults(func=lambda args: get_transcription(args.youtube_url, args.output_filename, args.get_best_model, args.get_latest, args.output_format))
+    url_get_parser.set_defaults(func=lambda args: get_transcription(args.media_url, args.output_filename, args.get_best_model, args.get_latest, args.output_format))
 
     transcribe_subparsers.required = True
 
