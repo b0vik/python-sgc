@@ -12,12 +12,16 @@ from datetime import datetime
 import base64
 from tqdm import tqdm
 import time
+from sgcclient import SGClient
 
 pbar = None
+client = None
+
+baseurl = "http://192.168.1.221:8080"
 
 def get_job_status(job_id):
     headers = {'Authorization': f'Bearer {get_api_key()}'}
-    response = requests.post('http://localhost:8080/getJobStatus', json={'jobIdentifier': job_id}, headers=headers)
+    response = requests.post(baseurl + '/getJobStatus', json={'jobIdentifier': job_id}, headers=headers)
     return response.json()
 
 def display_progress_bar(job_id):
@@ -83,7 +87,7 @@ def get_api_key():
     
 
 def create_account(username):
-   url = "http://localhost:8080/createAccount"
+   url = f"{baseurl}/createAccount"
    data = {
        'username': username
    }
@@ -117,7 +121,7 @@ def resolve_url(url):
         return info_dict['channel_url']
 
 def request_transcription(video_url, model, save_filename=None):
-    url = "http://localhost:8080/requestUrlTranscription"
+    url = f"{baseurl}/requestUrlTranscription"
     data = {
         'requestedModel': model,
         'jobType': 'public-url',
@@ -194,7 +198,7 @@ def process_file(file_path, skip_prompt, model): # TODO: clean up this function
 def convert_and_request_transcription(file_path, model, save_filename=None):
     output_file = file_path.rsplit('.', 1)[0] + '.wav'
     subprocess.run(['ffmpeg', '-i', file_path, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-loglevel', 'quiet', output_file]) #  TODO: use pyav rather than shelling out to ffmpeg; this is sketchy cross-platform
-    url = "http://localhost:8080/requestFileTranscription"
+    url = f"{baseurl}/requestFileTranscription"
     with open(output_file, 'rb') as f:
         files = {'file': f}
         data = {
@@ -241,7 +245,7 @@ def convert_and_request_transcription(file_path, model, save_filename=None):
 
         
 def list_transcriptions(url): #TODO: separate this
-    api_url = "http://localhost:8080/retrieveCompletedTranscripts"
+    api_url = f"{baseurl}/retrieveCompletedTranscripts"
     data = {
         'transcriptType': 'public-url',
         'audioUrl': url
