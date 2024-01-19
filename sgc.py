@@ -17,23 +17,24 @@ from sgcclient import SGClient
 pbar = None
 client = None
 
-baseurl = "http://192.168.1.221:8080"
+baseurl = "http://localhost:8080"
 
 def get_job_status(job_id):
-    headers = {'Authorization': f'Bearer {get_api_key()}'}
-    response = requests.post(baseurl + '/getJobStatus', json={'jobIdentifier': job_id}, headers=headers)
-    return response.json()
+    # headers = {'Authorization': f'Bearer {get_api_key()}'}
+    # response = requests.post(baseurl + '/getJobStatus', json={'jobIdentifier': job_id}, headers=headers)
+    # return response.json()
+    return client.get_job_status(job_id)
 
 def display_progress_bar(job_id):
     global pbar
     while True:
         data = get_job_status(job_id)
-
-        if data.get('progress') is not None and data.get('video_length') is not None:
-            video_length = round(data.get('video_length'), 2)
-            progress = round(data.get('progress') * video_length, 2)
+        # print("Getting job status")
+        if data.get('progress') is not None:
+            # print(data)
+            progress = round(data.get('progress') * data.get('audioLength'), 3)
             if pbar is None:
-                pbar = tqdm(total=video_length, bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
+                pbar = tqdm(total=data.get('audioLength'), bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}{postfix}]")
             pbar.update(progress - pbar.n)
             if pbar.format_dict['rate'] is not None:
                 pbar.set_postfix_str(f"{pbar.format_dict['rate']:.2f}x realtime")
@@ -45,22 +46,18 @@ def display_progress_bar(job_id):
 
 
 def get_transcription(media_url, output_filename, get_best_model, get_latest, output_format):
-    transcriptions = list_transcriptions(media_url)
-
-    if get_best_model:
+    transcriptions = client.list_transcriptions(url=media_url) # TODO: sorting, output format
+    try:
         transcription = transcriptions[0]
-    elif get_latest:
-        transcription = max(transcriptions, key=lambda x: x['completedTime'])
-    else:
-        transcription = transcriptions[0]  # Default to the first transcription if no option is specified
+        decoded_transcription = transcription["text"]
 
-    decoded_transcription = base64.b64decode(transcription['transcript'], validate=False).decode('utf-8')
-
-    if output_filename == '-':
-        print(decoded_transcription)
-    else:
-        with open(output_filename, 'w') as f:
-            f.write(decoded_transcription)
+        if output_filename == '-':
+            print(decoded_transcription)
+        else:
+            with open(output_filename, 'w') as f:
+                f.write(decoded_transcription)
+    except IndexError:
+        print(f"No transcriptions found for {media_url}")
 
 def find_youtube_urls(text):
     url_pattern = re.compile(r'(https?://)?(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})')
@@ -87,24 +84,15 @@ def get_api_key():
     
 
 def create_account(username):
-   url = f"{baseurl}/createAccount"
-   data = {
-       'username': username
-   }
-   response = requests.post(url, json=data)
-   response_data = response.json()
-
-   if response.status_code != 200:
-       print(f"Error: {response_data['message']}")
-       return
+   account = client.create_account(username) # TODO: error handling
 
    # Save the username and api key to config.yml
    config = configparser.ConfigParser()
-   config['DEFAULT'] = {'username': username, 'api_key': response_data['api_key']}
+   config['DEFAULT'] = {'username': account['username'], 'api_key': account['api_key']}
    with open(get_config_path(), 'w') as configfile:
        config.write(configfile)
 
-   print(response_data)
+   print(account)
 
 def resolve_url(url):
     print(f"Resolving non-canonical url {url}:")
@@ -151,14 +139,11 @@ def request_transcription(video_url, model, save_filename=None):
             time.sleep(1)
             
     # Retrieve the completed transcription
-    response = requests.post('http://localhost:8080/retrieveTranscriptByJobId', json={'jobId': job_id}, headers=headers)
-    transcript_data = response.json()
-    transcript = base64.b64decode(transcript_data['transcript'], validate=False).decode('utf-8')
-
+    transcript = client.retrieve_transcript_by_job_id(job_id)
     # Save the transcript to a file if the --save option was used
     if save_filename and transcript:
         with open(save_filename, 'w') as f:
-            f.write(transcript)
+            f.write(transcript['text'])
 
     return transcript
 
@@ -209,7 +194,7 @@ def convert_and_request_transcription(file_path, model, save_filename=None):
         response = requests.post(url, files=files, data=data, headers=headers)
 
     # Extract the job_id from the response
-    response_data = response.json()
+    response_data = client.request_transcription(file=output_file)
     job_id = response_data.get('job_id')
     sha512 = response_data.get('sha512')
     print(response_data)
@@ -257,7 +242,7 @@ def list_transcriptions(url): #TODO: separate this
     # Sort the transcriptions by model quality
     model_order = ['large-v3', 'large-v2', 'large', 'medium', 'medium.en', 'small', 'small.en', 'base', 'base.en', 'tiny', 'tiny.en']
     transcriptions.sort(key=lambda x: model_order.index(x['requestedModel']))
-        
+    
     return transcriptions
         
 def print_transcriptions(url):
@@ -269,8 +254,10 @@ def print_transcriptions(url):
         
 
 def main():
+    global client
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers()
+    client = SGClient(api_key="debug", base_url=baseurl) # TODO: proper api key grabbing
 
     transcribe_parser = subparsers.add_parser('transcribe', description='Requests transcriptions from the SGC cluster.')
     transcribe_subparsers = transcribe_parser.add_subparsers()
@@ -329,7 +316,7 @@ def main():
     url_get_parser.add_argument('media_url', type=str)
     url_get_parser.add_argument('--get-best-model', action='store_true')
     url_get_parser.add_argument('--get-latest', action='store_true')
-    url_get_parser.add_argument('--output-format', type=str, choices=['vtt'], default='vtt')
+    url_get_parser.add_argument('--output-format', type=str, choices=['vtt', 'srt', 'txt', 'tsv', 'json'], default='vtt')
     url_get_parser.set_defaults(func=lambda args: get_transcription(args.media_url, args.output_filename, args.get_best_model, args.get_latest, args.output_format))
 
     transcribe_subparsers.required = True

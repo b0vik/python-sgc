@@ -50,37 +50,41 @@ class SGClient:
         response = requests.post(f'{self.base_url}/retrieveTranscriptByJobId', json={'jobId': job_id}, headers=self.headers)
         response.raise_for_status()
         transcript_data = response.json()
+        transcript = transcript_data['transcript']
         # transcript = base64.b64decode(transcript_data['transcript'], validate=False).decode('utf-8')
-        
         return transcript
 
-    def list_transcriptions(self, url=None, sha512=None, file=None, sort_by=TranscriptionSortType.BY_MODEL_QUALITY):
+    def list_transcriptions(self, url=None, sha512=None, file=None, transcript_format='vtt', sort_by=TranscriptionSortType.BY_MODEL_QUALITY):
         data = None
         if url:
             data = {
                 'transcriptType': 'public-url',
-                'audioUrl': url
+                'audioUrl': url,
+                'format': transcript_format
             }
         elif sha512:
             data = {
                 'transcriptType': 'file',
-                'sha512': sha512
+                'sha512': sha512,
+                'format': transcript_format
             }
         elif file:
             with open(file, 'rb') as f:
                 file_hash = hashlib.sha512(f.read()).hexdigest()
             data = {
                 'transcriptType': 'file',
-                'sha512': file_hash
+                'sha512': file_hash,
+                'format': transcript_format
             }
         else:
             return
         
         response = requests.post(f'{self.base_url}/retrieveCompletedTranscripts', json=data, headers=self.headers)
         response.raise_for_status()
-        transcriptions = response.json()
+        transcriptions = response.json()["transcripts"]
         # Sort the transcriptions by model quality
         # TODO: factor in requested sort type
+        print(transcriptions)
         model_order = ['large-v3', 'large-v2', 'large', 'medium', 'medium.en', 'small', 'small.en', 'base', 'base.en', 'tiny', 'tiny.en']
         transcriptions.sort(key=lambda x: model_order.index(x['requestedModel']))
         return transcriptions
